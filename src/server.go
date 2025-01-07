@@ -6,10 +6,14 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 )
 
 func handleConnection(clientConnection net.Conn, backendServerIP string) {
 	defer clientConnection.Close()
+
+	// start time for request processing
+	start := time.Now()
 
 	// parse the request from the client
 	req, err := http.ReadRequest(bufio.NewReader(clientConnection))
@@ -19,7 +23,7 @@ func handleConnection(clientConnection net.Conn, backendServerIP string) {
 	}
 
 	// log the incoming request
-	log.Printf("Received request of type %s to %s, redirected it to %s", req.Method, req.URL, backendServerIP)
+	log.Printf("Received request: %s %s", req.Method, req.URL)
 
 	// forward the request to the backend server
 	resp, err := forwardRequest(req, backendServerIP)
@@ -27,6 +31,9 @@ func handleConnection(clientConnection net.Conn, backendServerIP string) {
 		log.Printf("Failed to forward request: %v", err)
 		return
 	}
+
+	elapsed := time.Since(start)
+    log.Printf("Request forwarded to %s, response status: %d, time taken: %v", backendServerIP, resp.StatusCode, elapsed)
 
 	// write the response back to the client
 	err = resp.Write(clientConnection)

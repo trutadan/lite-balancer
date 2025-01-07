@@ -3,18 +3,27 @@ package src
 import (
 	"log"
 	"net"
+	"net/http"
 	"sync"
+	"time"
 )
 
 type LoadBalancer struct {
-	servers 	 []string
-	currentIndex int
-	mutex 		 sync.Mutex
+	servers 	 	[]string
+	healthyServers 	map[string]bool
+	currentIndex 	int
+	mutex 		 	sync.Mutex
 }
 
 func NewLoadBalancer(servers []string) *LoadBalancer {
+	healthyServers := make(map[string]bool)
+	for _, server := range servers {
+		healthyServers[server] = true
+	}
+
 	return &LoadBalancer{
 		servers: servers,
+		healthyServers: healthyServers,
 		currentIndex: 0,
 		mutex: sync.Mutex{},
 	}
@@ -22,13 +31,18 @@ func NewLoadBalancer(servers []string) *LoadBalancer {
 
 func (lb *LoadBalancer) NextServer() string {
 	lb.mutex.Lock()
+	defer lb.mutex.Unlock()
 
-	server := lb.servers[lb.currentIndex]
-	lb.currentIndex = (lb.currentIndex + 1) % len(lb.servers)
+	for i := 0; i < len(lb.servers); i++ {
+		server := lb.servers[lb.currentIndex]
+		lb.currentIndex = (lb.currentIndex + 1) % len(lb.servers)
 
-	lb.mutex.Unlock()
+		if lb.healthyServers[server] {
+			return server
+		}
+	}
 
-	return server
+	return ""
 }
 
 func (lb *LoadBalancer) StartLoadBalancerServer(port string) {
@@ -58,7 +72,42 @@ func (lb *LoadBalancer) StartLoadBalancerServer(port string) {
 		// handle the connection
 		go func(conn net.Conn) {
 			defer wg.Done()
-			handleConnection(conn, lb.NextServer())
+
+			server := lb.NextServer()
+			if server == "" {
+				log.Printf("No healthy servers available...")
+				conn.Close()
+				return
+			}
+
+			handleConnection(conn, server)
 		}(conn)
+	}
+}
+
+func (lb *LoadBalancer) HealthCheck(interval time.Duration, checkURL string) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		for _, server := range lb.servers {
+			go func(server string) {
+				resp, err := http.Get(server + checkURL)
+				lb.mutex.Lock()
+				defer lb.mutex.Unlock()
+
+				if err != nil || resp.StatusCode != http.StatusOK {
+					log.Printf("Server %s is unhealthy", server)
+					lb.healthyServers[server] = false
+				} else {
+					log.Printf("Server %s is healthy", server)
+					lb.healthyServers[server] = true
+				}
+
+				if resp != nil {
+					resp.Body.Close()
+				}
+			}(server)
+		}
 	}
 }

@@ -19,7 +19,7 @@ func handleConnection(clientConnection net.Conn, backendServerIP string) {
 	}
 
 	// log the incoming request
-	log.Printf("Received request: %s %s", req.Method, req.URL)
+	log.Printf("Received request of type %s to %s, redirected it to %s", req.Method, req.URL, backendServerIP)
 
 	// forward the request to the backend server
 	resp, err := forwardRequest(req, backendServerIP)
